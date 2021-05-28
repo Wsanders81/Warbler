@@ -1,10 +1,9 @@
 import os
-
 from flask import Flask, render_template, request, flash, redirect, session, g
 from flask_debugtoolbar import DebugToolbarExtension
 from sqlalchemy.exc import IntegrityError
 
-from forms import UserAddForm, LoginForm, MessageForm
+from forms import UserAddForm, LoginForm, MessageForm, UserEditForm
 from models import db, connect_db, User, Message
 
 CURR_USER_KEY = "curr_user"
@@ -18,9 +17,12 @@ app.config['SQLALCHEMY_DATABASE_URI'] = (
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ECHO'] = False
-app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = True
+app.config['DEBUG_TB_INTERCEPT_REDIRECTS'] = False
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', "it's a secret")
 toolbar = DebugToolbarExtension(app)
+
+
+
 
 connect_db(app)
 
@@ -113,7 +115,9 @@ def login():
 def logout():
     """Handle logout of user."""
 
-    # IMPLEMENT THIS
+    do_logout()
+    flash('You have been logged out', 'success')
+    return redirect('/')
 
 
 ##############################################################################
@@ -127,13 +131,12 @@ def list_users():
     """
 
     search = request.args.get('q')
-
     if not search:
         users = User.query.all()
     else:
         users = User.query.filter(User.username.like(f"%{search}%")).all()
 
-    return render_template('users/index.html', users=users)
+    return render_template('users/index.html', users=users, location=g)
 
 
 @app.route('/users/<int:user_id>')
@@ -141,7 +144,7 @@ def users_show(user_id):
     """Show user profile."""
 
     user = User.query.get_or_404(user_id)
-
+    
     # snagging messages in order from the database;
     # user.messages won't be in order by default
     messages = (Message
@@ -212,6 +215,14 @@ def profile():
     """Update profile for current user."""
 
     # IMPLEMENT THIS
+    user = User.query.get(session[CURR_USER_KEY])
+    form = UserEditForm(obj=user)
+    if form.validate_on_submit():
+        form.populate_obj(user)
+        db.session.commit()
+        return redirect(f'/users/{user.id}')
+    
+    return render_template('/users/edit.html', form=form)
 
 
 @app.route('/users/delete', methods=["POST"])
@@ -292,8 +303,11 @@ def homepage():
     """
 
     if g.user:
+        following = [f.id for f in g.user.following] + [g.user.id]
+        
         messages = (Message
                     .query
+                    .filter(Message.user_id.in_(following))
                     .order_by(Message.timestamp.desc())
                     .limit(100)
                     .all())
