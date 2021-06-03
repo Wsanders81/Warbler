@@ -39,8 +39,8 @@ class MessageViewTestCase(TestCase):
     def setUp(self):
         """Create test client, add sample data."""
 
-        User.query.delete()
-        Message.query.delete()
+        db.drop_all()
+        db.create_all() 
 
         self.client = app.test_client()
 
@@ -48,9 +48,13 @@ class MessageViewTestCase(TestCase):
                                     email="test@test.com",
                                     password="testuser",
                                     image_url=None)
-
+        self.testuser.id = 1234
+        
         db.session.commit()
-
+    def tearDown(self) -> None:
+        return super().tearDown()
+        db.session.rollback()
+        
     def test_add_message(self):
         """Can use add a message?"""
 
@@ -71,3 +75,59 @@ class MessageViewTestCase(TestCase):
 
             msg = Message.query.one()
             self.assertEqual(msg.text, "Hello")
+        
+    def test_messages_show(self): 
+        with self.client as client: 
+            
+            m = Message(
+                id = 2222, 
+                text = "Another Test", 
+                user_id = self.testuser.id
+            )
+            db.session.add(m)
+            db.session.commit()
+            
+            resp = client.get(f"/messages/{m.id}")
+            msg = Message.query.get(m.id)
+            self.assertEqual(resp.status_code, 200)
+            self.assertIn(msg.text, str(resp.data))
+    
+    
+    
+    def test_logged_out_add_message(self): 
+        with self.client as client: 
+            resp = client.post("/messages/new", data={"text" : "Test"}, follow_redirects=True)
+            self.assertEqual(resp.status_code, 200)
+            self.assertIn("Access unauthorized", str(resp.data))
+            
+    def test_destroy_message(self): 
+        m_len = Message.query.all()
+        
+        test_user = User.signup(username="fake user", 
+                                email="fake@gmail.com", 
+                                password="password123", 
+                                image_url=None)
+        test_user.id = 8888
+        
+        m = Message(
+                id = 2222, 
+                text = "Another Test", 
+                user_id = self.testuser.id
+        )
+        db.session.add_all([test_user, m])
+        db.session.commit()
+        
+        with self.client as client: 
+            with client.session_transaction() as session: 
+                session[CURR_USER_KEY] = test_user.id
+            resp = client.post('/messages/2222/delete', follow_redirects=True)
+            self.assertEqual(resp.status_code, 200)
+            m_final_len = Message.query.all()
+            self.assertEqual(len(m_len), len(m_final_len))
+
+    def test_unauthorized_destroy_message(self): 
+        with self.client as client: 
+            
+            res = client.post(f"/messages/1234/delete", follow_redirects=True)
+            self.assertEqual(res.status_code, 200)
+            self.assertIn("Access unauthorized", str(res.data))

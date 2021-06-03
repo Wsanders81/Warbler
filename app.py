@@ -1,14 +1,20 @@
 import os
+import pdb
 from flask import Flask, render_template, request, flash, redirect, session, g
 from flask_debugtoolbar import DebugToolbarExtension
 from sqlalchemy.exc import IntegrityError
 
 from forms import UserAddForm, LoginForm, MessageForm, UserEditForm
-from models import db, connect_db, User, Message
+from models import db, connect_db, User, Message, Likes
 
 CURR_USER_KEY = "curr_user"
 
 app = Flask(__name__)
+
+import logging
+handler = logging.FileHandler("test.log")  # Create the file logger
+app.logger.addHandler(handler)             # Add it to the built-in logger
+app.logger.setLevel(logging.DEBUG)         # Set the log level to debug
 
 # Get DB_URI from environ variable (useful for production/testing) or,
 # if not set there, use development local db.
@@ -194,8 +200,8 @@ def add_follow(follow_id):
 
     return redirect(f"/users/{g.user.id}/following")
 
-
-@app.route('/users/stop-following/<int:follow_id>', methods=['POST'])
+#* Changed to a GET route to test view
+@app.route('/users/stop-following/<int:follow_id>', methods=['GET','POST'])
 def stop_following(follow_id):
     """Have currently-logged-in-user stop following this user."""
 
@@ -214,7 +220,7 @@ def stop_following(follow_id):
 def profile():
     """Update profile for current user."""
 
-    # IMPLEMENT THIS
+    
     user = User.query.get(session[CURR_USER_KEY])
     form = UserEditForm(obj=user)
     if form.validate_on_submit():
@@ -311,11 +317,48 @@ def homepage():
                     .order_by(Message.timestamp.desc())
                     .limit(100)
                     .all())
+        like_ids = [m.id for m in g.user.likes]
 
-        return render_template('home.html', messages=messages)
+        return render_template('home.html', messages=messages, likes=like_ids)
 
     else:
         return render_template('home-anon.html')
+
+
+##############################################################################
+# Functionality to add likes 
+
+
+@app.route('/users/add_like/<int:message_id>', methods=["POST"])
+def add_like(message_id): 
+    
+    if not g.user:
+        flash("Access unauthorized.", "danger")
+        return redirect("/")
+    
+    like_ids = [m.id for m in g.user.likes]
+    message = Message.query.get_or_404(message_id)
+    if message_id not in like_ids: 
+        new_like = Likes(user_id=g.user.id, message_id=message.id)
+        db.session.add(new_like)
+        db.session.commit()
+        return redirect('/')
+    else: 
+        
+        like_id = [l.id for l in g.user.likes if message_id == l.id]
+        like = Likes.query.filter(Likes.message_id == message_id).first()
+        
+        # like = Likes.query.get_or_404(like_id)
+        db.session.delete(like)
+        db.session.commit()
+        return redirect('/')
+
+
+
+@app.errorhandler(404)
+def render_404_page(e): 
+    return render_template("404.html"), 404
+
 
 
 ##############################################################################
